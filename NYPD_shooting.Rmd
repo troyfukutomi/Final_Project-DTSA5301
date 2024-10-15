@@ -1,0 +1,205 @@
+---
+title: "NYPD Shootings"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+## Importing Dataset
+
+This dataset is a list of every shooting that has occurred in New York City since 2006. We have data all the way up to 2023.
+Every record in the set will include information about the event such as locations, times, as well as information about the suspects and victims. 
+
+With this dataset I aim to show which boroughs and which age groups have been subject to the most shootings. We will also take a look to see which age groups and boroughs have seen the least shootings. Let's also look to see if which boroughs have seen an increase or decrease in shootings. 
+
+```{r NYPD}
+library(tidyverse)
+NYPD <- read_csv("https://data.cityofnewyork.us/api/views/833y-fsy8/rows.csv?accessType=DOWNLOAD")
+if(!file.exists("Data")) {dir.create("Data")}
+summary(NYPD)
+```
+## Tidying and Transforming data
+As we tidy and transform the NYPD dataset, we will alter some types like the date, and we will delete some rows that are not necessary.
+
+
+```{r NYPD transformed}
+NYPD <- NYPD %>%
+select(-Longitude, -Latitude, -Lon_Lat, -Y_COORD_CD, -X_COORD_CD,
+-STATISTICAL_MURDER_FLAG, -JURISDICTION_CODE, -PRECINCT, -VIC_RACE, -PERP_RACE, -LOCATION_DESC, -INCIDENT_KEY, -OCCUR_TIME, -LOC_OF_OCCUR_DESC, - LOC_CLASSFCTN_DESC, -VIC_SEX, -PERP_SEX)
+
+NYPD <- NYPD %>%
+mutate(OCCUR_DATE = mdy(OCCUR_DATE))
+
+head(NYPD)
+```
+ A quick look into the dataset now we can see some missing values. Lets see where and how much we are indeed missing. Lets also take a look at the different values in this column
+ 
+```{r missing data}
+colSums(is.na(NYPD))
+table(NYPD$PERP_AGE_GROUP)
+```
+ We notice a pretty large chunk of missing data for our Perp_Age_Group. Luckily this is the only column that we are currently observing that has missing values. We also see some strange values that don't align with the rest of the age group data such as (1020, 1028, and 940).So lets see if these values appear in VIC_AGE_GROUP as well.
+ 
+```{r victim group look in}
+table(NYPD$VIC_AGE_GROUP)
+```
+ 
+It appears that we see an odd value (1022) in here as well but we only have one instance of this value for each column. Since this is only a few rows in each column lets treat is as missing value. We can see that we have "(null)" and "UNKNOWN" values that were not picked up in our search for missing data. So let's deal with those.
+ 
+To try and mitigate bias with our Perp_Age_Group and Vic_Age_Group, let's fill in the missing values. To do this we will take averages from our non missing values. Then we will fill the null and unknown values to match the same averages. Example:we find that 50% of our existing values are age group 18-24 then 50% of the missing values will be filled in with this value.
+
+
+```{r filling in}
+NYPD$PERP_AGE_GROUP[NYPD$PERP_AGE_GROUP %in% c("(null)", "UNKNOWN", "1020","1028", "224", "940")] <- NA
+NYPD$VIC_AGE_GROUP[NYPD$VIC_AGE_GROUP %in% c("(null)", "UNKNOWN", "1022")] <- NA
+
+age_group_proportions <- prop.table(table(NYPD$PERP_AGE_GROUP, useNA = "no"))
+
+age_group_proportions2 <- prop.table(table(NYPD$VIC_AGE_GROUP, useNA = "no"))
+
+missing_age_fill <- sample(names(age_group_proportions), 
+                           sum(is.na(NYPD$PERP_AGE_GROUP)), 
+                           replace = TRUE, 
+                           prob = age_group_proportions)
+
+missing_age_fill2 <- sample(names(age_group_proportions2), 
+                           sum(is.na(NYPD$VIC_AGE_GROUP)), 
+                           replace = TRUE, 
+                           prob = age_group_proportions2)
+
+NYPD$PERP_AGE_GROUP[is.na(NYPD$PERP_AGE_GROUP)] <- missing_age_fill
+
+
+NYPD$VIC_AGE_GROUP[is.na(NYPD$VIC_AGE_GROUP)] <- missing_age_fill2
+
+table(NYPD$PERP_AGE_GROUP)
+table(NYPD$VIC_AGE_GROUP)
+
+```
+Now our data looks better filled with values we can use. 
+Lets start visualizing the data 
+
+
+## Visualizing and Analyzing our data
+
+First lets take a look at our Perpetrator age groups over the years and lets see which age group has been the source of the most shootings over the year and observe any changes
+
+```{r perpetrator histogram}
+NYPD$YEAR <- as.numeric(format(as.Date(NYPD$OCCUR_DATE, "%Y-%m-%d"), "%Y"))
+bright_colors <- c("#FF5733", "#33FF57", "#33CFFF", "#FFC133", "#FF33FF", "#33FFF3", "#CFFF33", "#FF3399")
+
+ggplot(NYPD, aes(x = YEAR, fill = PERP_AGE_GROUP)) +
+geom_histogram(binwidth = 1, position = "stack") +  
+scale_fill_manual(values = bright_colors) +         
+labs(title = "Number of Shootings by Perpetrator Age Group Over Time",
+x = "Year",
+y = "Number of Shootings",
+fill = "Perp Age Group") +  
+theme_minimal()
+
+```
+
+We can see that the majority of the shootings are sourced from the ages of 18-24. The 25-44 age group is not far behind even surpassing the younger age group by just a little bit for a few of the years. Particularly in the more recent years. 
+
+Let's keep this in mind while we look at our victim data next. 
+
+```{r victim hostogram}
+ggplot(NYPD, aes(x = YEAR, fill = VIC_AGE_GROUP)) +
+geom_histogram(binwidth = 1, position = "stack") +
+scale_fill_manual(values = bright_colors) +
+labs(title = "Victim Age Group Over Time",
+x = "Year",
+y = "Number of Shootings",
+fill = "Victim Age Group") +
+theme_minimal()
+
+```
+ After looking at this histogram, we observe that the 18-24 age group accounts for a large portion of the shootings like we saw in the perpetrator data. A noticeable difference is how much closer the 25-44 age group is to the 18-24 group. In most cases these two groups are either just about equal, then in the later years there is definite proof that the 25-44 group is consistently largest than the 18-24 age group.
+ 
+ Comparing the output of these two histograms we can determine a few things. Early on in the data's recordings we see that the two age groups contributing to the most shootings are the 18-24 age group and the 25-44 age group with the younger age group taking a slight edge. The most likely victims around this time were people in the same age groups of 18-24 and 25-44. 
+ 
+ As time goes on, just before the pandemic we see a large increase in shootings overall from the previous few years leading up to the pandemic. The latest year in the data suggests that the older age group of 25-44 might have just beat out 18-24 for total shootings. In terms of the victims during the big spike close to the pandemic, we see that the 25-44 group is definitely larger than the younger 18-24 group. So just before the pandemic we see the older age group participating in more shooting and also becoming the victims in more shootings.  
+
+  Quickly lets also check out the Boroughs and observe any trends
+  
+```{r boros}
+ggplot(NYPD, aes(x = YEAR, fill = BORO)) +
+geom_histogram(binwidth = 1, position = "stack") +  
+scale_fill_manual(values = bright_colors) +    
+labs(title = "Number of Shootings by Borough Over Time",
+x = "Year",
+y = "Number of Shootings",
+fill = "Borough") +  
+theme_minimal()
+
+```
+  
+After observing this histogram we can determine that Brooklyn has been the site of the most shootings over the years with the Bronx right behind. An interesting observation occurs at the later points in the data after the pandemic spike. It seems like the last 2-3 years have seen the Bronx overtake Brooklyn in shooting numbers, but only just. It will be intersting to see if that trend continues in the future. 
+
+## Modeling the Data
+  
+In order to make some predictions we will have to alter our data a bit. We will aggregate the data to get the total number of shootings for each age group and borough over time for both perpetrators and victims. LEts also reshape the data a bit too.
+  
+```{r agg}
+NYPD_summary <- NYPD %>%
+  mutate(Year = year(OCCUR_DATE)) %>%
+  group_by(Year, BORO, PERP_AGE_GROUP, VIC_AGE_GROUP) %>%
+  summarise(
+    Perpetrator_Count = n(),
+    Victim_Count = n(),
+    .groups = 'drop'
+  )
+
+NYPD_summary
+
+NYPD_wide <- NYPD_summary %>%
+pivot_wider(
+names_from = PERP_AGE_GROUP,
+values_from = Perpetrator_Count,
+values_fill = list(Perpetrator_Count = 0)
+) %>%
+pivot_wider(
+names_from = VIC_AGE_GROUP,
+values_from = Victim_Count,
+values_fill = list(Victim_Count = 0),
+names_prefix = "Victim_"
+)
+NYPD_wide
+
+
+```
+  
+Now lets fit our predictive models and make predictions.
+
+```{r predict}
+perp_model <- lm(Perpetrator_Count ~ Year, data = NYPD_summary %>% filter(PERP_AGE_GROUP == "18-24"))
+
+victim_model <- lm(Victim_Count ~ Year, data = NYPD_summary %>% filter(VIC_AGE_GROUP == "18-24"))
+
+summary(perp_model)
+summary(victim_model)
+
+
+future_years <- data.frame(Year = seq(from = max(NYPD_summary$Year) + 1, to = max(NYPD_summary$Year) + 5))
+
+future_perp_predictions <- predict(perp_model, newdata = future_years)
+future_victim_predictions <- predict(victim_model, newdata = future_years)
+
+predictions_df <- data.frame(
+Year = future_years$Year,
+Predicted_Perpetrator_Count = future_perp_predictions,
+Predicted_Victim_Count = future_victim_predictions
+)
+
+predictions_df
+
+```
+
+We can see based on our predictions that we expect a decline in shootings over the next few years.
+
+
+## Bias
+A source of bias came early on when we looked at some of those data values that didn't quite make sense in the age groups. the rows where we saw "1020" "1022" etc. We just considered those values as missing values and then added average values to the missing ones. This is one bias that might have skewed our data a small amount. 
